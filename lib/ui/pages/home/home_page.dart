@@ -13,6 +13,8 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(final BuildContext context) {
     var examType = 'Índice Cardíaco';
+    final screenSize = MediaQuery.of(context).size;
+    final screenWidth = screenSize.width;
     return ChangeNotifierProvider(
       create: (final _) {
         final myController = HomeController();
@@ -93,7 +95,7 @@ class HomePage extends StatelessWidget {
                                 Colors.white,
                               ),
                             ),
-                            onPressed: () {
+                            onPressed: () async {
                               String type;
                               if (examType == 'Índice Cardíaco') {
                                 type = 'ind_card';
@@ -104,7 +106,7 @@ class HomePage extends StatelessWidget {
                               } else {
                                 type = 'data';
                               }
-                              controller.searchButton(context, type, cpf);
+                              await controller.searchButton(context, type, cpf);
                             },
                             child: const Text('Consultar Resultados'),
                           ),
@@ -228,16 +230,16 @@ class HomePage extends StatelessWidget {
                                         ),
                                       ),
                                       if (controller.combinedData[index]
-                                              ['ind_card'] !=
-                                          null)
+                                              ['result_type'] ==
+                                          'ind_card')
                                         Text(
-                                          'Ind. Card. ${controller.combinedData[index]['ind_card']}', // ignore: lines_longer_than_80_chars
+                                          'Ind. Card. ${controller.combinedData[index]['result_data']}', // ignore: lines_longer_than_80_chars
                                         )
                                       else if (controller.combinedData[index]
-                                              ['ind_pulm'] !=
-                                          null)
+                                              ['result_type'] ==
+                                          'ind_pulm')
                                         Text(
-                                          'Ind. Pulm. ${controller.combinedData[index]['ind_pulm']}', // ignore: lines_longer_than_80_chars
+                                          'Ind. Pulm. ${controller.combinedData[index]['result_data']}', // ignore: lines_longer_than_80_chars
                                         ),
                                     ],
                                   );
@@ -248,8 +250,27 @@ class HomePage extends StatelessWidget {
                         ],
                       ),
                     )
-                  : const Center(
-                      child: CircularProgressIndicator(),
+                  : Center(
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                            width: screenWidth * 0.2,
+                            height: screenWidth * 0.2,
+                            child: CircularProgressIndicator(
+                              value: controller.loadingProgress,
+                              strokeWidth: 6,
+                              color: Colors.blue,
+                            ),
+                          ),
+                          Text(
+                            '${((controller.loadingProgress) * 100).toInt()}%',
+                            style: const TextStyle(
+                              color: Colors.lightBlue,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
             ),
           );

@@ -4,6 +4,9 @@ import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../../../database/results_database.dart';
+import '../../../model/result.dart';
+
 class HomeController extends ChangeNotifier {
   HomeController();
 
@@ -12,8 +15,6 @@ class HomeController extends ChangeNotifier {
   bool isPulmonaryResultLoaded = false;
   bool isCombinedResultsLoaded = false;
   List<String> dropdownPatients = [];
-  List<Map<String, dynamic>> indCardData = [];
-  List<Map<String, dynamic>> indPulmData = [];
   List<Map<String, dynamic>> combinedData = [];
   List<Map<String, dynamic>> patientsList = [];
   String _cpf = '';
@@ -24,6 +25,8 @@ class HomeController extends ChangeNotifier {
   String pulmIndex = '';
   int? startEpoch;
   int? endEpoch;
+  final ResultsDatabase _db = ResultsDatabase();
+  double loadingProgress = 0;
 
   Future<void> onInit() async {
     await getPatientsData();
@@ -73,6 +76,8 @@ class HomeController extends ChangeNotifier {
 
     if (response.statusCode == 200) {
       final responseData = json.decode(response.body) as List<dynamic>;
+      final dataQty = responseData.length;
+      final progressIncrease = 1.0 / dataQty;
 
       for (final dynamic data in responseData) {
         if (data is Map<String, dynamic>) {
@@ -83,8 +88,10 @@ class HomeController extends ChangeNotifier {
               'https://raw.githubusercontent.com/$owner/$repo/main/dados/indice_cardiaco/$fileName',
             ),
           );
-          indCardData.addAll(await parseHeartFileContent(response.body));
+          await parseHeartFileContent(response.body);
         }
+        loadingProgress += progressIncrease / 2;
+        notifyListeners();
       }
     } else {
       log('Failed to list files: ${response.statusCode}');
@@ -100,6 +107,8 @@ class HomeController extends ChangeNotifier {
         await http.get(Uri.parse('$apiBaseUrl/$owner/$repo/contents/$path'));
     if (response.statusCode == 200) {
       final responseData = json.decode(response.body) as List<dynamic>;
+      final dataQty = responseData.length;
+      final progressIncrease = 1.0 / dataQty;
 
       for (final dynamic data in responseData) {
         if (data is Map<String, dynamic>) {
@@ -110,8 +119,10 @@ class HomeController extends ChangeNotifier {
               'https://raw.githubusercontent.com/$owner/$repo/main/dados/indice_pulmonar/$fileName',
             ),
           );
-          indPulmData.addAll(await parsePulmFileContent(response.body));
+          await parsePulmFileContent(response.body);
         }
+        loadingProgress += progressIncrease / 2;
+        notifyListeners();
       }
       isDataLoaded = true;
       notifyListeners();
@@ -146,7 +157,7 @@ class HomeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<List<Map<String, dynamic>>> parseHeartFileContent(
+  Future<void> parseHeartFileContent(
     final String content,
   ) async {
     final lines = content.split('\n');
@@ -167,13 +178,17 @@ class HomeController extends ChangeNotifier {
         };
 
         data.add(rowData);
+        await _saveResult(
+          cpf,
+          epoch.toString(),
+          'ind_card',
+          indCard.toString(),
+        );
       }
     }
-
-    return data;
   }
 
-  Future<List<Map<String, dynamic>>> parsePulmFileContent(
+  Future<void> parsePulmFileContent(
     final String content,
   ) async {
     final lines = content.split('\n');
@@ -194,24 +209,28 @@ class HomeController extends ChangeNotifier {
         };
 
         data.add(rowData);
+        await _saveResult(
+          cpf,
+          epoch.toString(),
+          'ind_pulm',
+          indCard.toString(),
+        );
       }
     }
-
-    return data;
   }
 
-  void searchButton(
+  Future<void> searchButton(
     final BuildContext context,
     final String type,
     final String cpf,
-  ) {
+  ) async {
     if (type == 'ind_card') {
-      latestHeartIndex(cpf);
+      await latestHeartIndex(cpf);
     } else if (type == 'ind_pul') {
-      latestPulmonaryIndex(cpf);
+      await latestPulmonaryIndex(cpf);
     } else if (type == 'ambos') {
-      latestHeartIndex(cpf);
-      latestPulmonaryIndex(cpf);
+      await latestHeartIndex(cpf);
+      await latestPulmonaryIndex(cpf);
     } else if (type == 'data') {
       if (startEpoch == null && endEpoch == null) {
         final now = DateTime.now();
@@ -220,26 +239,17 @@ class HomeController extends ChangeNotifier {
         startEpoch = startOfDay.millisecondsSinceEpoch ~/ 1000;
         endEpoch = endOfDay.millisecondsSinceEpoch ~/ 1000;
       }
-      combinedResultsByDate(context, startEpoch ?? 0, endEpoch ?? 0);
+      await combinedResultsByDate(context, startEpoch ?? 0, endEpoch ?? 0);
     }
   }
 
   // Function to find the latest Heart Index based on the CPF
-  void latestHeartIndex(final String targetCpf) {
-    Map<String, dynamic>? mostRecentItem;
-    var maxEpoch = 0;
-    for (final item in indCardData) {
-      final cpf = item['cpf'].toString();
-      final epoch = int.parse(item['epoch'].toString());
-      if (cpf == targetCpf && epoch > maxEpoch) {
-        maxEpoch = epoch;
-        mostRecentItem = item;
-      }
-    }
-    if (mostRecentItem != null) {
+  Future<void> latestHeartIndex(final String targetCpf) async {
+    final latestResult = await _db.getLatestIndCard(targetCpf);
+    if (latestResult != null) {
       dateConvertedHeart =
-          convertEpochToDateString(mostRecentItem['epoch'].toString());
-      heartIndex = mostRecentItem['ind_card'].toString();
+          convertEpochToDateString(latestResult['epoch'].toString());
+      heartIndex = latestResult['result_data'].toString();
       isCardiacResultLoaded = true;
       notifyListeners();
     } else {
@@ -248,21 +258,12 @@ class HomeController extends ChangeNotifier {
   }
 
   // Function to find the latest Pulmonary Index based on the CPF
-  void latestPulmonaryIndex(final String targetCpf) {
-    Map<String, dynamic>? mostRecentItem;
-    var maxEpoch = 0;
-    for (final item in indPulmData) {
-      final cpf = item['cpf'].toString();
-      final epoch = int.parse(item['epoch'].toString());
-      if (cpf == targetCpf && epoch > maxEpoch) {
-        maxEpoch = epoch;
-        mostRecentItem = item;
-      }
-    }
-    if (mostRecentItem != null) {
+  Future<void> latestPulmonaryIndex(final String targetCpf) async {
+    final latestResult = await _db.getLatestPulmCard(targetCpf);
+    if (latestResult != null) {
       dateConvertedPulm =
-          convertEpochToDateString(mostRecentItem['epoch'].toString());
-      pulmIndex = mostRecentItem['ind_pulm'].toString();
+          convertEpochToDateString(latestResult['epoch'].toString());
+      pulmIndex = latestResult['result_data'].toString();
       isPulmonaryResultLoaded = true;
       notifyListeners();
     } else {
@@ -271,34 +272,17 @@ class HomeController extends ChangeNotifier {
   }
 
   // Creates a list with both heart and pulmonary indexes ordered by epoch
-  void combinedResultsByDate(
+  Future<void> combinedResultsByDate(
     final BuildContext context,
     final int startDate,
     final int endDate,
-  ) {
+  ) async {
     combinedData.clear();
-    for (final item in indCardData) {
-      final epoch = int.parse(
-        item['epoch'].toString(),
-      );
-      if (epoch >= startDate && epoch <= endDate) {
-        combinedData.add(item);
-      }
-    }
-    for (final item in indPulmData) {
-      final epoch = int.parse(
-        item['epoch'].toString(),
-      );
-      if (epoch >= startDate && epoch <= endDate) {
-        combinedData.add(item);
-      }
-    }
-    combinedData.sort(
-      (final a, final b) => int.parse(a['epoch'].toString())
-          .compareTo(int.parse(b['epoch'].toString())),
-    );
+    combinedData = (await _db.getCombinedResultsByDate(startDate, endDate))!;
     if (combinedData.isEmpty) {
-      _showSnackBar(context, 'Nenhum resultado nesta data!');
+      if (context.mounted) {
+        _showSnackBar(context, 'Nenhum resultado nesta data!');
+      }
     }
     isCombinedResultsLoaded = true;
     notifyListeners();
@@ -320,7 +304,7 @@ class HomeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  //SNACKBAR PARA ALERTAS
+  // SnackBar for Alerts
   void _showSnackBar(final BuildContext context, final String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -338,5 +322,25 @@ class HomeController extends ChangeNotifier {
         ),
       ),
     );
+  }
+
+  // Save Favorite
+  Future<void> _saveResult(
+    final String cpf,
+    final String epoch,
+    final String resultType,
+    final String resultData,
+  ) async {
+    final existingResult = await _db.getResult(cpf, epoch, resultType);
+
+    if (existingResult == null) {
+      final result = Result(
+        cpf,
+        epoch,
+        resultType,
+        resultData,
+      );
+      await _db.saveResult(result);
+    }
   }
 }
